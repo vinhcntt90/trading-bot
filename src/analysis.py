@@ -935,3 +935,315 @@ def calculate_golden_pocket_strategy(df, smc_data=None, pivots=None):
     
     return result
 
+
+# ============================================
+# ELLIOTT WAVE + FIBONACCI INDICATOR (NEW)
+# ============================================
+
+def detect_candlestick_pattern(df):
+    """
+    Detect Pinbar and Engulfing patterns on the last closed candle.
+    Returns: dict with pattern info
+    """
+    if len(df) < 3:
+        return {'pattern': None, 'type': None}
+    
+    # Use last CLOSED candle (index -2), not current forming candle
+    curr = df.iloc[-2]
+    prev = df.iloc[-3]
+    
+    curr_open = curr['open']
+    curr_high = curr['high']
+    curr_low = curr['low']
+    curr_close = curr['close']
+    
+    prev_open = prev['open']
+    prev_close = prev['close']
+    
+    # Body calculations
+    curr_body = abs(curr_close - curr_open)
+    curr_upper_wick = curr_high - max(curr_open, curr_close)
+    curr_lower_wick = min(curr_open, curr_close) - curr_low
+    curr_range = curr_high - curr_low
+    
+    prev_body = abs(prev_close - prev_open)
+    
+    result = {'pattern': None, 'type': None, 'strength': 0}
+    
+    # ===== PINBAR DETECTION =====
+    # Bullish Pinbar: Long lower wick (>= 2x body), small upper wick
+    if curr_body > 0 and curr_range > 0:
+        body_ratio = curr_body / curr_range
+        
+        # Bullish Pinbar
+        if curr_lower_wick >= 2 * curr_body and curr_upper_wick < curr_body:
+            if curr_close > curr_open:  # Green candle preferred
+                result = {'pattern': 'PINBAR', 'type': 'BULLISH', 'strength': 80}
+            else:
+                result = {'pattern': 'PINBAR', 'type': 'BULLISH', 'strength': 60}
+        
+        # Bearish Pinbar
+        elif curr_upper_wick >= 2 * curr_body and curr_lower_wick < curr_body:
+            if curr_close < curr_open:  # Red candle preferred
+                result = {'pattern': 'PINBAR', 'type': 'BEARISH', 'strength': 80}
+            else:
+                result = {'pattern': 'PINBAR', 'type': 'BEARISH', 'strength': 60}
+    
+    # ===== ENGULFING DETECTION =====
+    # Bullish Engulfing: Current green body engulfs previous red body
+    if prev_close < prev_open:  # Previous is red
+        if curr_close > curr_open:  # Current is green
+            if curr_close > prev_open and curr_open < prev_close:
+                engulf_strength = 70 + min(30, (curr_body / prev_body - 1) * 20) if prev_body > 0 else 70
+                if result['strength'] < engulf_strength:
+                    result = {'pattern': 'ENGULFING', 'type': 'BULLISH', 'strength': engulf_strength}
+    
+    # Bearish Engulfing: Current red body engulfs previous green body
+    if prev_close > prev_open:  # Previous is green
+        if curr_close < curr_open:  # Current is red
+            if curr_open > prev_close and curr_close < prev_open:
+                engulf_strength = 70 + min(30, (curr_body / prev_body - 1) * 20) if prev_body > 0 else 70
+                if result['strength'] < engulf_strength:
+                    result = {'pattern': 'ENGULFING', 'type': 'BEARISH', 'strength': engulf_strength}
+    
+    return result
+
+
+def calculate_elliott_wave_fibo(df, lookback=100):
+    """
+    Elliott Wave + Fibonacci Golden Pocket Strategy.
+    
+    Logic:
+    1. Find the Impulse Wave (Swing High/Low) in last `lookback` candles.
+    2. Calculate Fibonacci Retracements: 0.5, 0.618, 0.705 (OTE), 0.786.
+    3. Check if price is in OTE Zone (0.618 - 0.786) = Wave 2 or Wave 4 correction.
+    4. Confirm with Pinbar or Engulfing pattern.
+    
+    Returns: dict with action, entry, sl, tp, reason, etc.
+    """
+    result = {
+        'valid': False,
+        'trend': 'NEUTRAL',
+        'impulse_type': None,  # 'UP' or 'DOWN'
+        'swing_high': 0,
+        'swing_low': 0,
+        'swing_high_idx': 0,
+        'swing_low_idx': 0,
+        'fib_levels': {},
+        'ote_zone': {'high': 0, 'low': 0},
+        'entry': 0,
+        'sl': 0,
+        'tp1': 0,
+        'tp2': 0,
+        'action': 'WAIT',
+        'reason': '',
+        'candlestick_pattern': None,
+        'wave_context': '',
+    }
+    
+    if len(df) < lookback:
+        result['reason'] = f'Không đủ dữ liệu (cần {lookback}+ nến)'
+        return result
+    
+    current_price = df['close'].iloc[-1]
+    recent_df = df.tail(lookback).copy()
+    
+    # ===== 1. FIND FRACTALS (Swing High/Low) =====
+    def find_fractals_simple(data, left=5, right=5):
+        """Find Fractal Highs and Lows"""
+        highs = []
+        lows = []
+        
+        for i in range(left, len(data) - right):
+            is_high = True
+            is_low = True
+            
+            for j in range(1, left + 1):
+                if data['high'].iloc[i] <= data['high'].iloc[i - j]:
+                    is_high = False
+                if data['low'].iloc[i] >= data['low'].iloc[i - j]:
+                    is_low = False
+            
+            for j in range(1, right + 1):
+                if data['high'].iloc[i] <= data['high'].iloc[i + j]:
+                    is_high = False
+                if data['low'].iloc[i] >= data['low'].iloc[i + j]:
+                    is_low = False
+            
+            if is_high:
+                highs.append({'idx': i, 'price': data['high'].iloc[i], 'global_idx': len(df) - lookback + i})
+            if is_low:
+                lows.append({'idx': i, 'price': data['low'].iloc[i], 'global_idx': len(df) - lookback + i})
+        
+        return highs, lows
+    
+    fractal_highs, fractal_lows = find_fractals_simple(recent_df, left=5, right=5)
+    
+    if not fractal_highs or not fractal_lows:
+        result['reason'] = 'Không tìm thấy Fractal Swing'
+        return result
+    
+    # ===== 2. IDENTIFY IMPULSE WAVE =====
+    # Find the HIGHEST High and LOWEST Low
+    highest = max(fractal_highs, key=lambda x: x['price'])
+    lowest = min(fractal_lows, key=lambda x: x['price'])
+    
+    result['swing_high'] = highest['price']
+    result['swing_low'] = lowest['price']
+    result['swing_high_idx'] = highest['global_idx']
+    result['swing_low_idx'] = lowest['global_idx']
+    
+    fib_range = highest['price'] - lowest['price']
+    
+    if fib_range <= 0:
+        result['reason'] = 'Không có biên độ sóng hợp lệ'
+        return result
+    
+    # Determine Impulse Direction based on which swing came LAST
+    if highest['idx'] > lowest['idx']:
+        # HIGH came after LOW -> Impulse UP -> Looking for LONG on pullback
+        impulse_type = 'UP'
+        trend = 'BULLISH'
+        wave_context = 'Sóng đẩy Tăng - Đợi hồi về Fibo để MUA'
+    else:
+        # LOW came after HIGH -> Impulse DOWN -> Looking for SHORT on rally
+        impulse_type = 'DOWN'
+        trend = 'BEARISH'
+        wave_context = 'Sóng đẩy Giảm - Đợi hồi lên Fibo để BÁN'
+    
+    result['impulse_type'] = impulse_type
+    result['trend'] = trend
+    result['wave_context'] = wave_context
+    
+    # ===== 3. CALCULATE FIBONACCI LEVELS =====
+    if impulse_type == 'UP':
+        # Retracement from HIGH down
+        fib_0 = highest['price']
+        fib_236 = highest['price'] - fib_range * 0.236
+        fib_382 = highest['price'] - fib_range * 0.382
+        fib_5 = highest['price'] - fib_range * 0.5
+        fib_618 = highest['price'] - fib_range * 0.618
+        fib_705 = highest['price'] - fib_range * 0.705  # OTE Mid
+        fib_786 = highest['price'] - fib_range * 0.786
+        fib_1 = lowest['price']
+        
+        ote_high = fib_618
+        ote_low = fib_786
+        
+    else:  # Impulse DOWN
+        # Retracement from LOW up
+        fib_0 = lowest['price']
+        fib_236 = lowest['price'] + fib_range * 0.236
+        fib_382 = lowest['price'] + fib_range * 0.382
+        fib_5 = lowest['price'] + fib_range * 0.5
+        fib_618 = lowest['price'] + fib_range * 0.618
+        fib_705 = lowest['price'] + fib_range * 0.705  # OTE Mid
+        fib_786 = lowest['price'] + fib_range * 0.786
+        fib_1 = highest['price']
+        
+        ote_high = fib_786
+        ote_low = fib_618
+    
+    result['fib_levels'] = {
+        '0.0': fib_0,
+        '0.236': fib_236,
+        '0.382': fib_382,
+        '0.5': fib_5,
+        '0.618': fib_618,
+        '0.705': fib_705,
+        '0.786': fib_786,
+        '1.0': fib_1,
+    }
+    result['ote_zone'] = {'high': ote_high, 'low': ote_low}
+    
+    # ===== 4. CHECK IF PRICE IS IN OTE ZONE =====
+    price_in_ote = ote_low <= current_price <= ote_high
+    price_near_ote = ote_low * 0.995 <= current_price <= ote_high * 1.005
+    
+    # ===== 5. CHECK CANDLESTICK PATTERN =====
+    candle_pattern = detect_candlestick_pattern(df)
+    result['candlestick_pattern'] = candle_pattern
+    
+    has_bullish_confirmation = candle_pattern['type'] == 'BULLISH' and candle_pattern['strength'] >= 60
+    has_bearish_confirmation = candle_pattern['type'] == 'BEARISH' and candle_pattern['strength'] >= 60
+    
+    # ===== 6. GENERATE SIGNAL =====
+    # ATR for SL buffer
+    if 'ATR' in df.columns:
+        atr = df['ATR'].iloc[-1]
+    else:
+        high_low = df['high'] - df['low']
+        high_close = abs(df['high'] - df['close'].shift())
+        low_close = abs(df['low'] - df['close'].shift())
+        tr = high_low.combine(high_close, max).combine(low_close, max)
+        atr = tr.rolling(window=14).mean().iloc[-1]
+    
+    if impulse_type == 'UP':
+        # Looking for LONG
+        entry_price = fib_618  # Entry at 0.618
+        sl_price = fib_786 - atr * 1.5  # SL below 0.786 + ATR buffer
+        tp1_price = highest['price']  # TP1 at swing high
+        tp2_price = highest['price'] + fib_range * 0.272  # TP2 at -0.272 extension
+        
+        if price_in_ote or price_near_ote:
+            if has_bullish_confirmation:
+                result['valid'] = True
+                result['action'] = 'LONG'
+                result['reason'] = f"✅ Giá trong vùng OTE + {candle_pattern['pattern']} xác nhận"
+            else:
+                result['action'] = 'WAIT'
+                result['reason'] = f"⏳ Giá trong vùng OTE, chờ nến xác nhận (Pinbar/Engulfing)"
+        elif current_price > ote_high:
+            result['action'] = 'MISSED'
+            result['reason'] = f"❌ Giá đã vượt vùng OTE (${ote_high:,.0f})"
+        elif current_price < ote_low:
+            result['action'] = 'INVALIDATED'
+            result['reason'] = f"⚠️ Giá đã phá vỡ dưới vùng OTE - Setup không hợp lệ"
+        else:
+            result['action'] = 'WAIT'
+            result['reason'] = f"⏳ Chờ giá về vùng OTE (${ote_low:,.0f} - ${ote_high:,.0f})"
+            
+    else:  # Impulse DOWN -> SHORT
+        entry_price = fib_618  # Entry at 0.618
+        sl_price = fib_786 + atr * 1.5  # SL above 0.786 + ATR buffer
+        tp1_price = lowest['price']  # TP1 at swing low
+        tp2_price = lowest['price'] - fib_range * 0.272  # TP2 at -0.272 extension
+        
+        if price_in_ote or price_near_ote:
+            if has_bearish_confirmation:
+                result['valid'] = True
+                result['action'] = 'SHORT'
+                result['reason'] = f"✅ Giá trong vùng OTE + {candle_pattern['pattern']} xác nhận"
+            else:
+                result['action'] = 'WAIT'
+                result['reason'] = f"⏳ Giá trong vùng OTE, chờ nến xác nhận (Pinbar/Engulfing)"
+        elif current_price < ote_low:
+            result['action'] = 'MISSED'
+            result['reason'] = f"❌ Giá đã xuống dưới vùng OTE (${ote_low:,.0f})"
+        elif current_price > ote_high:
+            result['action'] = 'INVALIDATED'
+            result['reason'] = f"⚠️ Giá đã phá vỡ trên vùng OTE - Setup không hợp lệ"
+        else:
+            result['action'] = 'WAIT'
+            result['reason'] = f"⏳ Chờ giá về vùng OTE (${ote_low:,.0f} - ${ote_high:,.0f})"
+    
+    result['entry'] = entry_price
+    result['sl'] = sl_price
+    result['tp1'] = tp1_price
+    result['tp2'] = tp2_price
+    
+    # Debug output
+    print(f"\n  🌊 Elliott Wave Fibo Analysis:")
+    print(f"    Impulse: {impulse_type} | Trend: {trend}")
+    print(f"    Swing High: ${highest['price']:,.0f} (idx {highest['idx']})")
+    print(f"    Swing Low: ${lowest['price']:,.0f} (idx {lowest['idx']})")
+    print(f"    Fibo Range: ${fib_range:,.0f}")
+    print(f"    OTE Zone: ${ote_low:,.0f} - ${ote_high:,.0f}")
+    print(f"    Current Price: ${current_price:,.0f}")
+    print(f"    In OTE: {price_in_ote} | Near OTE: {price_near_ote}")
+    print(f"    Candle: {candle_pattern['pattern']} ({candle_pattern['type']})")
+    print(f"    -> Action: {result['action']}")
+    print(f"    -> Reason: {result['reason']}")
+    
+    return result
+

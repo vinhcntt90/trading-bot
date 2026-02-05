@@ -221,6 +221,32 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
         else:
             gp_info += f"\n   {gp_strat['reason']}"
 
+    # Elliott Wave Fibo Strategy (NEW)
+    ew_info = ""
+    ew_strat = plan.get('elliott_wave_fibo')
+    if ew_strat:
+        ote = ew_strat.get('ote_zone', {})
+        ew_emoji = "🟢" if ew_strat['action'] == 'LONG' else ("🔴" if ew_strat['action'] == 'SHORT' else "⚪")
+        
+        ew_info = f"""
+
+🌊 *ELLIOTT WAVE FIBO:*
+• Impulse: {ew_strat.get('impulse_type', 'N/A')}
+• OTE Zone: ${ote.get('low', 0):,.0f} - ${ote.get('high', 0):,.0f}
+{ew_emoji} {ew_strat['action']}"""
+        
+        cp = ew_strat.get('candlestick_pattern', {})
+        if cp and cp.get('pattern'):
+            ew_info += f"\n• Candle: {cp['pattern']} ({cp['type']})"
+        
+        if ew_strat['valid']:
+            ew_info += f"""
+   Entry: ${ew_strat['entry']:,.0f}
+   SL: ${ew_strat['sl']:,.0f}
+   TP1: ${ew_strat['tp1']:,.0f} | TP2: ${ew_strat['tp2']:,.0f}"""
+        else:
+            ew_info += f"\n   {ew_strat['reason']}"
+
     # Final Caption
     caption = f"""📊 *BTC/USDT Analysis*
 🕐 {datetime.now().strftime("%d/%m/%Y %H:%M")}
@@ -230,6 +256,7 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
 *Multi-TF Bias:*
 {chr(10).join(tf_lines)}{deriv_info}
 {summary_info}
-{rec_info}{gp_info}"""
+{rec_info}{gp_info}{ew_info}"""
     
     return caption
+

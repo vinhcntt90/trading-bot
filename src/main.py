@@ -12,7 +12,8 @@ from .analysis import (
     get_fibonacci_levels, analyze_timeframe_detailed, 
     calculate_golden_pocket_strategy, calculate_gann_fan, get_gann_signal,
     get_moon_phase_simple, get_lunar_trading_signal, get_mercury_retrograde,
-    detect_wyckoff_phase, analyze_smc
+    detect_wyckoff_phase, analyze_smc,
+    calculate_elliott_wave_fibo  # NEW
 )
 from .plotting import plot_plotly_chart, plot_fibo_chart
 from .reporting import (
@@ -213,6 +214,34 @@ def main():
     print(f"  Reason         : {gp_strategy['reason']}")
     print("=" * 60)
     
+    # 11b. Elliott Wave Fibo Strategy (NEW INDICATOR)
+    print("\n[*] Calculating Elliott Wave + Fibonacci Strategy...")
+    ew_fibo = calculate_elliott_wave_fibo(df, lookback=100)
+    plan['elliott_wave_fibo'] = ew_fibo
+    
+    print("\n" + "=" * 60)
+    print("  🌊 ELLIOTT WAVE + FIBONACCI (NEW)")
+    print("=" * 60)
+    print(f"  Impulse Type   : {ew_fibo['impulse_type']}")
+    print(f"  Wave Context   : {ew_fibo['wave_context']}")
+    print(f"  Swing High     : ${ew_fibo['swing_high']:,.0f}")
+    print(f"  Swing Low      : ${ew_fibo['swing_low']:,.0f}")
+    ote = ew_fibo['ote_zone']
+    print(f"  OTE Zone       : ${ote['low']:,.0f} - ${ote['high']:,.0f}")
+    if ew_fibo.get('candlestick_pattern'):
+        cp = ew_fibo['candlestick_pattern']
+        print(f"  Candle Pattern : {cp.get('pattern', 'None')} ({cp.get('type', 'None')})")
+    print("-" * 60)
+    ew_emoji = "🟢" if ew_fibo['action'] == 'LONG' else ("🔴" if ew_fibo['action'] == 'SHORT' else "⚪")
+    print(f"  {ew_emoji} Action: {ew_fibo['action']}")
+    if ew_fibo['valid']:
+        print(f"  Entry          : ${ew_fibo['entry']:,.0f}")
+        print(f"  Stop Loss      : ${ew_fibo['sl']:,.0f}")
+        print(f"  TP1            : ${ew_fibo['tp1']:,.0f}")
+        print(f"  TP2            : ${ew_fibo['tp2']:,.0f}")
+    print(f"  Reason         : {ew_fibo['reason']}")
+    print("=" * 60)
+    
     # 12. Generate Charts
     print("\n[*] Generating chart with Trading Plan...")
     chart_path = plot_plotly_chart(df, timeframes_bias, pivots, poc_data, plan)
@@ -221,7 +250,7 @@ def main():
         
     # Generate Fibo Chart
     print("\n[*] Generating Fibonacci Chart...")
-    fibo_chart_path = plot_fibo_chart(df, gp_strategy)
+    fibo_chart_path = plot_fibo_chart(df, gp_strategy, ew_fibo)
     if fibo_chart_path:
         plan['fibo_chart_path'] = fibo_chart_path
         print(f"[+] Saved: {fibo_chart_path}")

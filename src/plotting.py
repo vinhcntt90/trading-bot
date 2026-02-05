@@ -118,9 +118,10 @@ def plot_plotly_chart(df, timeframes_bias, pivots, poc_data, plan):
         print(f"[!] Error saving Plotly chart: {e}")
         return None
 
-def plot_fibo_chart(df, gp_result):
+def plot_fibo_chart(df, gp_result, ew_result=None):
     """
     Generate Fibonacci Chart for Golden Pocket Strategy using Plotly
+    Now also supports Elliott Wave overlay
     """
     if not gp_result or gp_result.get('trend') == 'NEUTRAL':
         return None
@@ -142,7 +143,7 @@ def plot_fibo_chart(df, gp_result):
         decreasing_line_color='#ef5350'
     ))
     
-    # 2. Fibo Levels
+    # 2. Fibo Levels (from Golden Pocket)
     swing_high = gp_result['swing_high']
     swing_low = gp_result['swing_low']
     trend = gp_result['trend']
@@ -193,6 +194,96 @@ def plot_fibo_chart(df, gp_result):
         fig.add_hline(y=sl, line_color="red", line_dash="dash", annotation_text=f"SL: {sl:,.0f}")
         fig.add_hline(y=tp1, line_color="lime", line_dash="dot", annotation_text=f"TP1: {tp1:,.0f}")
 
+    # ===== 5. ELLIOTT WAVE OVERLAY (NEW) =====
+    if ew_result and ew_result.get('impulse_type'):
+        ew_swing_high = ew_result['swing_high']
+        ew_swing_low = ew_result['swing_low']
+        ew_swing_high_idx = ew_result.get('swing_high_idx', 0)
+        ew_swing_low_idx = ew_result.get('swing_low_idx', 0)
+        ote_zone = ew_result.get('ote_zone', {})
+        
+        # Convert global indices to chart_df indices (approximate)
+        chart_start_idx = len(df) - 120
+        
+        # OTE Zone (0.618 - 0.786) - Different color from Golden Pocket
+        if ote_zone.get('low') and ote_zone.get('high'):
+            fig.add_shape(type="rect",
+                x0=chart_df.index[0], y0=ote_zone['low'],
+                x1=chart_df.index[-1], y1=ote_zone['high'],
+                fillcolor="rgba(255, 152, 0, 0.2)",  # Orange
+                line_width=1, line_color="rgba(255, 152, 0, 0.8)",
+                layer="below"
+            )
+            # OTE Label
+            fig.add_annotation(
+                x=chart_df.index[-5], y=(ote_zone['low'] + ote_zone['high']) / 2,
+                text="🌊 OTE ZONE",
+                showarrow=False, xanchor='right',
+                font=dict(color='#ff9800', size=12, family='Arial Black'),
+                bgcolor='rgba(0,0,0,0.5)'
+            )
+        
+        # Swing High Marker
+        high_chart_idx = max(0, min(ew_swing_high_idx - chart_start_idx, len(chart_df) - 1))
+        if 0 <= high_chart_idx < len(chart_df):
+            fig.add_trace(go.Scatter(
+                x=[chart_df.index[high_chart_idx]],
+                y=[ew_swing_high],
+                mode='markers+text',
+                marker=dict(symbol='triangle-down', size=15, color='#f44336'),
+                text=['🔻 HIGH'],
+                textposition='top center',
+                textfont=dict(color='#f44336', size=10),
+                showlegend=False
+            ))
+        
+        # Swing Low Marker
+        low_chart_idx = max(0, min(ew_swing_low_idx - chart_start_idx, len(chart_df) - 1))
+        if 0 <= low_chart_idx < len(chart_df):
+            fig.add_trace(go.Scatter(
+                x=[chart_df.index[low_chart_idx]],
+                y=[ew_swing_low],
+                mode='markers+text',
+                marker=dict(symbol='triangle-up', size=15, color='#4caf50'),
+                text=['🔺 LOW'],
+                textposition='bottom center',
+                textfont=dict(color='#4caf50', size=10),
+                showlegend=False
+            ))
+        
+        # Impulse Wave Line (connects Low to High or High to Low)
+        if ew_result['impulse_type'] == 'UP':
+            # Low -> High
+            fig.add_trace(go.Scatter(
+                x=[chart_df.index[low_chart_idx], chart_df.index[high_chart_idx]],
+                y=[ew_swing_low, ew_swing_high],
+                mode='lines',
+                line=dict(color='#2196f3', width=2, dash='dot'),
+                name='Impulse Wave',
+                showlegend=False
+            ))
+        else:
+            # High -> Low
+            fig.add_trace(go.Scatter(
+                x=[chart_df.index[high_chart_idx], chart_df.index[low_chart_idx]],
+                y=[ew_swing_high, ew_swing_low],
+                mode='lines',
+                line=dict(color='#ff5722', width=2, dash='dot'),
+                name='Impulse Wave',
+                showlegend=False
+            ))
+        
+        # Elliott Wave Action Label
+        ew_action = ew_result.get('action', 'WAIT')
+        ew_color = '#4caf50' if ew_action == 'LONG' else ('#f44336' if ew_action == 'SHORT' else '#ffffff')
+        fig.add_annotation(
+            x=chart_df.index[10], y=chart_df['high'].max(),
+            text=f"🌊 Elliott: {ew_action}",
+            showarrow=False, xanchor='left', yanchor='top',
+            font=dict(color=ew_color, size=14, family='Arial Black'),
+            bgcolor='rgba(0,0,0,0.7)', borderpad=4
+        )
+
     # Layout
     action_text = f"{gp_result['action']}"
     fig.update_layout(
@@ -214,3 +305,4 @@ def plot_fibo_chart(df, gp_result):
     except Exception as e:
         print(f"[!] Error saving Fibo chart: {e}")
         return None
+
