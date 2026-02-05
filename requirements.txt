@@ -1,0 +1,10 @@
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.15.0
+kaleido>=0.2.1
+requests>=2.31.0
+python-dotenv>=1.0.0
+binance-connector>=3.0.0
+skyfield>=1.46.0
+ta-lib-bin; platform_system == "Windows"
+colorama>=0.4.6
