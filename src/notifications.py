@@ -206,13 +206,13 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
    Wait for clear setup
    Score: {plan['score']:+d}"""
 
-        # AI Win Prob for WAIT state too
+        # AI Win Prob for WAIT state too (add hypothetical label)
         rec_prob = plan.get('ai_win_prob')
         if rec_prob is not None:
             prob_pct = rec_prob * 100
             prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
             confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
-            rec_info += f"\n   {prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence})"
+            rec_info += f"\n   {prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence}) _(Giả định)_"
 
     # Golden Pocket Strategy
     gp_info = ""
@@ -234,7 +234,9 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
             prob_pct = win_prob * 100
             prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
             confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
-            gp_info += f"\n{prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence})"
+            # Add hypothetical label when no valid trade
+            hypo_label = " _(Giả định)_" if not gp_strat['valid'] else ""
+            gp_info += f"\n{prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence}){hypo_label}"
         
         if gp_strat['valid']:
             gp_info += f"""
@@ -244,6 +246,13 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
    TP1: ${gp_strat['tp1']:,.0f} | TP2: ${gp_strat['tp2']:,.0f}"""
         else:
             gp_info += f"\n   {gp_strat['reason']}"
+            # Show hypothetical Entry/SL/TP
+            if gp_strat.get('entry') and gp_strat.get('sl') and gp_strat.get('tp1'):
+                gp_info += f"""
+   _(Giả định nếu vào lệnh:)_
+   Entry: ${gp_strat['entry']:,.0f}
+   SL: ${gp_strat['sl']:,.0f}
+   TP1: ${gp_strat['tp1']:,.0f} | TP2: ${gp_strat['tp2']:,.0f}"""
 
     # Elliott Wave Fibo Strategy (AI-Enhanced)
     ew_info = ""
@@ -265,7 +274,9 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
             prob_pct = win_prob * 100
             prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
             confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
-            ew_info += f"\n{prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence})"
+            # Add hypothetical label when no valid trade
+            hypo_label = " _(Giả định)_" if not ew_strat['valid'] else ""
+            ew_info += f"\n{prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence}){hypo_label}"
         
         cp = ew_strat.get('candlestick_pattern', {})
         if cp and cp.get('pattern'):
@@ -278,6 +289,13 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
    TP1: ${ew_strat['tp1']:,.0f} | TP2: ${ew_strat['tp2']:,.0f}"""
         else:
             ew_info += f"\n   {ew_strat['reason']}"
+            # Show hypothetical Entry/SL/TP
+            if ew_strat.get('entry') and ew_strat.get('sl') and ew_strat.get('tp1'):
+                ew_info += f"""
+   _(Giả định nếu vào lệnh:)_
+   Entry: ${ew_strat['entry']:,.0f}
+   SL: ${ew_strat['sl']:,.0f}
+   TP1: ${ew_strat['tp1']:,.0f} | TP2: ${ew_strat['tp2']:,.0f}"""
 
     # Final Caption
     caption = f"""📊 *BTC/USDT Analysis*
