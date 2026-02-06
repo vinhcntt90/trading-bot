@@ -1,9 +1,131 @@
 import pandas as pd
 import numpy as np
 import math
+import os
+import pickle
 from datetime import datetime
 from .indicators import calculate_indicators, calculate_sr_channels, detect_pivot_points
 from .config import Config
+
+# ============================================
+# ML MODEL LOADER (Phase 4)
+# ============================================
+MODEL_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
+_ml_model = None
+_ml_scaler = None
+_ml_features = None
+
+def load_ml_model():
+    """Load trained ML model for win probability prediction."""
+    global _ml_model, _ml_scaler, _ml_features
+    
+    if _ml_model is not None:
+        return True  # Already loaded
+    
+    model_path = os.path.join(MODEL_DIR, 'elliott_model.pkl')
+    scaler_path = os.path.join(MODEL_DIR, 'scaler.pkl')
+    features_path = os.path.join(MODEL_DIR, 'features.txt')
+    
+    if not all(os.path.exists(p) for p in [model_path, scaler_path, features_path]):
+        print("  [!] ML Model not found. Running without AI filter.")
+        return False
+    
+    try:
+        with open(model_path, 'rb') as f:
+            _ml_model = pickle.load(f)
+        with open(scaler_path, 'rb') as f:
+            _ml_scaler = pickle.load(f)
+        with open(features_path, 'r') as f:
+            _ml_features = f.read().strip().split('\n')
+        print("  [+] ML Model loaded successfully (AI Brain Active)")
+        return True
+    except Exception as e:
+        print(f"  [!] Error loading ML model: {e}")
+        return False
+
+
+def predict_win_probability(df, signal_data):
+    """
+    Predict win probability for ANY strategy signal using trained ML model.
+    Agnostic to strategy type (Elliott, Golden Pocket, etc.)
+    
+    Args:
+        df: DataFrame with indicators calculated
+        signal_data: Dict containing strategy results (needs 'action', 'trend')
+    
+    Returns:
+        float: Win probability (0.0 to 1.0), or None if model not available
+    """
+    global _ml_model, _ml_scaler, _ml_features
+    
+    if _ml_model is None:
+        load_ml_model()
+    
+    if _ml_model is None or _ml_scaler is None:
+        return None
+    
+    try:
+        # Extract features
+        current_idx = -1
+        
+        # Determine trend match based on whatever signal data we have
+        signal_trend = signal_data.get('trend', 'NEUTRAL')
+        signal_action = signal_data.get('action', 'WAIT')
+        
+        # Check candlestick pattern (if available in signal_data, else we detect below)
+        cp = signal_data.get('candlestick_pattern')
+
+        has_pattern = 0
+        pattern_matches_trend = 0
+        
+        # Try to infer pattern from df directly if not provided
+        # This mirrors what we did in data_miner
+        # (Re-implementing simplified detection here for robustness)
+        curr_row = df.iloc[-2] # Last closed candle
+        prev_row = df.iloc[-3]
+        
+        # Simple Pinbar Check
+        body = abs(curr_row['close'] - curr_row['open'])
+        wick_up = curr_row['high'] - max(curr_row['open'], curr_row['close'])
+        wick_down = min(curr_row['open'], curr_row['close']) - curr_row['low']
+        
+        pattern_type = None
+        if wick_down > 2 * body: pattern_type = 'BULLISH'
+        elif wick_up > 2 * body: pattern_type = 'BEARISH'
+        
+        if pattern_type:
+            has_pattern = 1
+            if (signal_action == 'LONG' and pattern_type == 'BULLISH') or \
+               (signal_action == 'SHORT' and pattern_type == 'BEARISH'):
+                pattern_matches_trend = 1
+
+        features = {
+            'rsi': df['RSI'].iloc[current_idx] if 'RSI' in df.columns else 50,
+            'ema50_slope': df['EMA50'].pct_change(periods=5).iloc[current_idx] * 100 if 'EMA50' in df.columns else 0,
+            'ema200_slope': df['EMA200'].pct_change(periods=10).iloc[current_idx] * 100 if 'EMA200' in df.columns else 0,
+            'price_vs_ema50': (df['close'].iloc[current_idx] - df['EMA50'].iloc[current_idx]) / df['EMA50'].iloc[current_idx] * 100 if 'EMA50' in df.columns else 0,
+            'price_vs_ema200': (df['close'].iloc[current_idx] - df['EMA200'].iloc[current_idx]) / df['EMA200'].iloc[current_idx] * 100 if 'EMA200' in df.columns else 0,
+            'vol_ratio': df['Vol_Ratio'].iloc[current_idx] if 'Vol_Ratio' in df.columns else 1,
+            'bb_width': df['BB_Width'].iloc[current_idx] if 'BB_Width' in df.columns else 0.02,
+            'has_pattern': has_pattern,
+            'pattern_matches_trend': pattern_matches_trend,
+        }
+        
+        # Build feature vector in correct order
+        X = np.array([[features.get(f, 0) for f in _ml_features]])
+        
+        # Handle NaN
+        X = np.nan_to_num(X, nan=0.0)
+        
+        # Scale and predict
+        X_scaled = _ml_scaler.transform(X)
+        prob = _ml_model.predict_proba(X_scaled)[0, 1]
+        
+        return prob
+    
+    except Exception as e:
+        print(f"  [!] ML Prediction error: {e}")
+        return None
 
 # ============================================
 # CONFIGURATION
@@ -655,24 +777,44 @@ def calculate_trading_plan(df, pivots, poc_data, timeframes_bias, gann_data=None
     elif score <= -1: direction = 'SHORT'
     else: direction = 'WAIT'
     
+    # Phase 5: AI Win Probability for Recommendation (ALWAYS Calculate)
+    # If WAIT, we still predict for the likely next action based on score tendency
+    if direction == 'WAIT':
+        # Use bias to determine potential action
+        potential_action = 'LONG' if bull_count > bear_count else 'SHORT'
+    else:
+        potential_action = direction
+    
+    rec_signal_data = {
+        'action': potential_action,
+        'trend': 'BULLISH' if potential_action == 'LONG' else 'BEARISH'
+    }
+    rec_win_prob = predict_win_probability(df, rec_signal_data)
+    
+    # Adjust Score based on AI Confidence (only if not WAIT)
+    if direction != 'WAIT' and rec_win_prob is not None:
+        if rec_win_prob >= 0.65: score += 1  # Bonus for high AI confidence
+        elif rec_win_prob < 0.40: score -= 1 # Penalty for low AI confidence
+    
     # Plans
     long_plan = {
         'entry': pivots['S1'], 'sl': pivots['S2'], 
         'tp1': pivots['PP'], 'tp2': pivots['R1'], 'tp3': pivots['R2'],
-        'rr': 1.5, 'winrate': 60
+        'win_probability': rec_win_prob if direction == 'LONG' else None
     }
     short_plan = {
         'entry': pivots['R1'], 'sl': pivots['R2'], 
         'tp1': pivots['PP'], 'tp2': pivots['S1'], 'tp3': pivots['S2'],
-        'rr': 1.5, 'winrate': 60
+        'win_probability': rec_win_prob if direction == 'SHORT' else None
     }
     
     return {
-        'score': score,
-        'direction': direction,
-        'signals': signals,
-        'long': long_plan,
+        'direction': direction, 
+        'score': score, 
+        'signal_analysis': signals, 
+        'long': long_plan, 
         'short': short_plan,
+        'ai_win_prob': rec_win_prob,  # Return for reporting
         'current_price': df['close'].iloc[-1]
     }
 

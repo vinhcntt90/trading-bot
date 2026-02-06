@@ -1,0 +1,9 @@
+rsi
+ema50_slope
+ema200_slope
+price_vs_ema50
+price_vs_ema200
+vol_ratio
+bb_width
+has_pattern
+pattern_matches_trend

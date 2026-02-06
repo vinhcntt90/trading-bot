@@ -192,11 +192,27 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
    TP1: ${tp1:,.0f} | TP2: ${tp2:,.0f} | TP3: ${tp3:,.0f}
    R/R: 1:{rr:.2f} | Win: {win:.0f}%
    Score: {plan['score']:+d}"""
+
+        # AI Win Prob for Recommendation
+        rec_prob = plan.get('ai_win_prob')
+        if rec_prob is not None:
+            prob_pct = rec_prob * 100
+            prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
+            confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
+            rec_info += f"\n   {prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence})"
     else:
         rec_info = f"""
 {dir_emoji} *RECOMMENDATION*
    Wait for clear setup
    Score: {plan['score']:+d}"""
+
+        # AI Win Prob for WAIT state too
+        rec_prob = plan.get('ai_win_prob')
+        if rec_prob is not None:
+            prob_pct = rec_prob * 100
+            prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
+            confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
+            rec_info += f"\n   {prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence})"
 
     # Golden Pocket Strategy
     gp_info = ""
@@ -211,6 +227,14 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
 • Trend: {gp_strat['trend']}
 • Zone: ${gp.get('low', 0):,.0f} - ${gp.get('high', 0):,.0f}
 {gp_emoji} {gp_strat['action']}"""
+
+        # AI Win Probability for GP
+        win_prob = gp_strat.get('win_probability')
+        if win_prob is not None:
+            prob_pct = win_prob * 100
+            prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
+            confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
+            gp_info += f"\n{prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence})"
         
         if gp_strat['valid']:
             gp_info += f"""
@@ -221,7 +245,7 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
         else:
             gp_info += f"\n   {gp_strat['reason']}"
 
-    # Elliott Wave Fibo Strategy (NEW)
+    # Elliott Wave Fibo Strategy (AI-Enhanced)
     ew_info = ""
     ew_strat = plan.get('elliott_wave_fibo')
     if ew_strat:
@@ -230,10 +254,18 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
         
         ew_info = f"""
 
-🌊 *ELLIOTT WAVE FIBO:*
+🌊 *ELLIOTT WAVE FIBO (AI):*
 • Impulse: {ew_strat.get('impulse_type', 'N/A')}
 • OTE Zone: ${ote.get('low', 0):,.0f} - ${ote.get('high', 0):,.0f}
 {ew_emoji} {ew_strat['action']}"""
+        
+        # AI Win Probability
+        win_prob = ew_strat.get('win_probability')
+        if win_prob is not None:
+            prob_pct = win_prob * 100
+            prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
+            confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
+            ew_info += f"\n{prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence})"
         
         cp = ew_strat.get('candlestick_pattern', {})
         if cp and cp.get('pattern'):
