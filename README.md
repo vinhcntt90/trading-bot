@@ -25,6 +25,9 @@ This project consolidates advanced trading strategies into a modular, easy-to-ru
 *   **Telegram Integration**: Sends detailed analysis reports and charts directly to your Telegram channel/group.
 *   **Console Dashboard**: Clean, summarized output in your terminal.
 
+## 📘 Strategy Documentation
+Detailed explanation of the algorithms, Elliott Wave logic, and technical modules can be found in [STRATEGY.md](STRATEGY.md).
+
 ---
 
 ## 🛠️ Installation
