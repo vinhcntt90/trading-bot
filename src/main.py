@@ -14,7 +14,8 @@ from .analysis import (
     get_moon_phase_simple, get_lunar_trading_signal, get_mercury_retrograde,
     detect_wyckoff_phase, analyze_smc,
     calculate_elliott_wave_fibo,
-    load_ml_model, predict_win_probability  # Phase 4: ML Integration
+    load_ml_model, predict_win_probability,
+    LLMAnalyst  # Embedded LLM Analyst
 )
 from .plotting import plot_plotly_chart, plot_fibo_chart
 from .reporting import (
@@ -186,6 +187,15 @@ def main():
     plan['gann'] = gann_data
     plan['lunar'] = lunar_data
     plan['cp_data'] = chartprime_data
+
+    # 10b. LLM Second Analyst
+    if Config.LLM_ENABLED:
+        print("\n[*] Generative AI Analysis (Second Opinion)...")
+        llm = LLMAnalyst()
+        llm_analysis = llm.generate_analysis(plan, df, smc_data, derivatives_data)
+        plan['llm_analysis'] = llm_analysis
+        if llm_analysis:
+            print("    [+] Analysis received from Gemini.")
     
     # 11. Golden Pocket Strategy
     print("\n[*] Calculating Golden Pocket Strategy (Parallel)...")

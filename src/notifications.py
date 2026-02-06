@@ -306,7 +306,9 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
 *Multi-TF Bias:*
 {chr(10).join(tf_lines)}{deriv_info}
 {summary_info}
-{rec_info}{gp_info}{ew_info}"""
+{rec_info}{gp_info}{ew_info}
+
+{plan.get('llm_analysis') or ''}"""
     
     return caption
 
