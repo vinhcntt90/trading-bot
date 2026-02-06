@@ -1009,21 +1009,23 @@ def detect_candlestick_pattern(df):
     return result
 
 
-def calculate_elliott_wave_fibo(df, lookback=100):
+def calculate_elliott_wave_fibo(df, lookback=100, use_ema_filter=True, use_rsi_filter=False):
     """
-    Elliott Wave + Fibonacci Golden Pocket Strategy.
+    Elliott Wave + Fibonacci OTE Strategy with 3-Module Logic.
     
-    Logic:
-    1. Find the Impulse Wave (Swing High/Low) in last `lookback` candles.
-    2. Calculate Fibonacci Retracements: 0.5, 0.618, 0.705 (OTE), 0.786.
-    3. Check if price is in OTE Zone (0.618 - 0.786) = Wave 2 or Wave 4 correction.
-    4. Confirm with Pinbar or Engulfing pattern.
+    Module 1 (Data): Uses the provided df with EMA50/EMA200/RSI columns.
+    Module 2 (Analysis):
+        - Step 1: Trend Filter (EMA 50/200).
+        - Step 2: Wave Structure (Impulse detection based on Trend).
+        - Step 3: Fibonacci OTE (0.618 - 0.786).
+    Module 3 (Signal): Candlestick pattern + RSI confirmation.
     
     Returns: dict with action, entry, sl, tp, reason, etc.
     """
     result = {
         'valid': False,
         'trend': 'NEUTRAL',
+        'ema_trend': 'NEUTRAL',  # EMA-based trend
         'impulse_type': None,  # 'UP' or 'DOWN'
         'swing_high': 0,
         'swing_low': 0,
@@ -1039,6 +1041,7 @@ def calculate_elliott_wave_fibo(df, lookback=100):
         'reason': '',
         'candlestick_pattern': None,
         'wave_context': '',
+        'rsi': 0,
     }
     
     if len(df) < lookback:
@@ -1048,7 +1051,39 @@ def calculate_elliott_wave_fibo(df, lookback=100):
     current_price = df['close'].iloc[-1]
     recent_df = df.tail(lookback).copy()
     
-    # ===== 1. FIND FRACTALS (Swing High/Low) =====
+    # ============================================
+    # MODULE 2 - STEP 1: EMA TREND FILTER
+    # ============================================
+    # Get EMAs
+    ema50 = df['EMA50'].iloc[-1] if 'EMA50' in df.columns else None
+    ema200 = df['EMA200'].iloc[-1] if 'EMA200' in df.columns else None
+    rsi = df['RSI'].iloc[-1] if 'RSI' in df.columns else 50
+    
+    result['rsi'] = rsi
+    
+    ema_trend = 'NEUTRAL'
+    if ema50 is not None and ema200 is not None:
+        if current_price > ema50 > ema200:
+            ema_trend = 'UPTREND'
+        elif current_price < ema50 < ema200:
+            ema_trend = 'DOWNTREND'
+        else:
+            ema_trend = 'SIDEWAY'
+    
+    result['ema_trend'] = ema_trend
+    
+    # Apply filter if enabled
+    if use_ema_filter and ema_trend == 'SIDEWAY':
+        result['action'] = 'WAIT'
+        result['reason'] = '⚪ EMA lộn xộn (Sideway) - Không giao dịch'
+        print(f"\n  🌊 Elliott Wave Fibo Analysis:")
+        print(f"    EMA Trend: {ema_trend} | EMA50: ${ema50:,.0f} | EMA200: ${ema200:,.0f}")
+        print(f"    -> Action: WAIT (Sideway Market)")
+        return result
+    
+    # ============================================
+    # MODULE 2 - STEP 2: FIND WAVE STRUCTURE
+    # ============================================
     def find_fractals_simple(data, left=5, right=5):
         """Find Fractal Highs and Lows"""
         highs = []
@@ -1083,7 +1118,6 @@ def calculate_elliott_wave_fibo(df, lookback=100):
         result['reason'] = 'Không tìm thấy Fractal Swing'
         return result
     
-    # ===== 2. IDENTIFY IMPULSE WAVE =====
     # Find the HIGHEST High and LOWEST Low
     highest = max(fractal_highs, key=lambda x: x['price'])
     lowest = min(fractal_lows, key=lambda x: x['price'])
@@ -1099,23 +1133,47 @@ def calculate_elliott_wave_fibo(df, lookback=100):
         result['reason'] = 'Không có biên độ sóng hợp lệ'
         return result
     
-    # Determine Impulse Direction based on which swing came LAST
-    if highest['idx'] > lowest['idx']:
-        # HIGH came after LOW -> Impulse UP -> Looking for LONG on pullback
-        impulse_type = 'UP'
-        trend = 'BULLISH'
-        wave_context = 'Sóng đẩy Tăng - Đợi hồi về Fibo để MUA'
+    # ============================================
+    # IMPULSE DIRECTION - BASED ON EMA TREND!
+    # ============================================
+    # Key change: We no longer determine trend from swing order.
+    # EMA determines the ALLOWED direction.
+    if use_ema_filter:
+        if ema_trend == 'UPTREND':
+            impulse_type = 'UP'
+            trend = 'BULLISH'
+            wave_context = 'Trend TĂNG (EMA) - Chỉ tìm kèo LONG'
+        elif ema_trend == 'DOWNTREND':
+            impulse_type = 'DOWN'
+            trend = 'BEARISH'
+            wave_context = 'Trend GIẢM (EMA) - Chỉ tìm kèo SHORT'
+        else:
+            impulse_type = None
+            trend = 'NEUTRAL'
+            wave_context = 'Sideway - Không giao dịch'
     else:
-        # LOW came after HIGH -> Impulse DOWN -> Looking for SHORT on rally
-        impulse_type = 'DOWN'
-        trend = 'BEARISH'
-        wave_context = 'Sóng đẩy Giảm - Đợi hồi lên Fibo để BÁN'
+        # Fallback to old logic: determine by swing order
+        if highest['idx'] > lowest['idx']:
+            impulse_type = 'UP'
+            trend = 'BULLISH'
+            wave_context = 'Sóng đẩy Tăng - Đợi hồi về Fibo để MUA'
+        else:
+            impulse_type = 'DOWN'
+            trend = 'BEARISH'
+            wave_context = 'Sóng đẩy Giảm - Đợi hồi lên Fibo để BÁN'
     
     result['impulse_type'] = impulse_type
     result['trend'] = trend
     result['wave_context'] = wave_context
     
-    # ===== 3. CALCULATE FIBONACCI LEVELS =====
+    if impulse_type is None:
+        result['action'] = 'WAIT'
+        result['reason'] = '⚪ Không xác định được xu hướng'
+        return result
+    
+    # ============================================
+    # MODULE 2 - STEP 3: FIBONACCI OTE
+    # ============================================
     if impulse_type == 'UP':
         # Retracement from HIGH down
         fib_0 = highest['price']
@@ -1123,7 +1181,7 @@ def calculate_elliott_wave_fibo(df, lookback=100):
         fib_382 = highest['price'] - fib_range * 0.382
         fib_5 = highest['price'] - fib_range * 0.5
         fib_618 = highest['price'] - fib_range * 0.618
-        fib_705 = highest['price'] - fib_range * 0.705  # OTE Mid
+        fib_705 = highest['price'] - fib_range * 0.705
         fib_786 = highest['price'] - fib_range * 0.786
         fib_1 = lowest['price']
         
@@ -1137,7 +1195,7 @@ def calculate_elliott_wave_fibo(df, lookback=100):
         fib_382 = lowest['price'] + fib_range * 0.382
         fib_5 = lowest['price'] + fib_range * 0.5
         fib_618 = lowest['price'] + fib_range * 0.618
-        fib_705 = lowest['price'] + fib_range * 0.705  # OTE Mid
+        fib_705 = lowest['price'] + fib_range * 0.705
         fib_786 = lowest['price'] + fib_range * 0.786
         fib_1 = highest['price']
         
@@ -1145,29 +1203,29 @@ def calculate_elliott_wave_fibo(df, lookback=100):
         ote_low = fib_618
     
     result['fib_levels'] = {
-        '0.0': fib_0,
-        '0.236': fib_236,
-        '0.382': fib_382,
-        '0.5': fib_5,
-        '0.618': fib_618,
-        '0.705': fib_705,
-        '0.786': fib_786,
-        '1.0': fib_1,
+        '0.0': fib_0, '0.236': fib_236, '0.382': fib_382,
+        '0.5': fib_5, '0.618': fib_618, '0.705': fib_705,
+        '0.786': fib_786, '1.0': fib_1,
     }
     result['ote_zone'] = {'high': ote_high, 'low': ote_low}
     
-    # ===== 4. CHECK IF PRICE IS IN OTE ZONE =====
+    # ============================================
+    # MODULE 3: SIGNAL CONFIRMATION
+    # ============================================
     price_in_ote = ote_low <= current_price <= ote_high
     price_near_ote = ote_low * 0.995 <= current_price <= ote_high * 1.005
     
-    # ===== 5. CHECK CANDLESTICK PATTERN =====
+    # Candlestick pattern
     candle_pattern = detect_candlestick_pattern(df)
     result['candlestick_pattern'] = candle_pattern
     
     has_bullish_confirmation = candle_pattern['type'] == 'BULLISH' and candle_pattern['strength'] >= 60
     has_bearish_confirmation = candle_pattern['type'] == 'BEARISH' and candle_pattern['strength'] >= 60
     
-    # ===== 6. GENERATE SIGNAL =====
+    # RSI Check (Optional)
+    rsi_ok_long = rsi < 40 if use_rsi_filter else True
+    rsi_ok_short = rsi > 60 if use_rsi_filter else True
+    
     # ATR for SL buffer
     if 'ATR' in df.columns:
         atr = df['ATR'].iloc[-1]
@@ -1178,54 +1236,65 @@ def calculate_elliott_wave_fibo(df, lookback=100):
         tr = high_low.combine(high_close, max).combine(low_close, max)
         atr = tr.rolling(window=14).mean().iloc[-1]
     
+    # ============================================
+    # GENERATE SIGNAL
+    # ============================================
     if impulse_type == 'UP':
         # Looking for LONG
-        entry_price = fib_618  # Entry at 0.618
-        sl_price = fib_786 - atr * 1.5  # SL below 0.786 + ATR buffer
-        tp1_price = highest['price']  # TP1 at swing high
-        tp2_price = highest['price'] + fib_range * 0.272  # TP2 at -0.272 extension
+        entry_price = fib_618
+        sl_price = fib_786 - atr * 1.5
+        tp1_price = highest['price']
+        tp2_price = highest['price'] + fib_range * 0.272
         
         if price_in_ote or price_near_ote:
             if has_bullish_confirmation:
-                result['valid'] = True
-                result['action'] = 'LONG'
-                result['reason'] = f"✅ Giá trong vùng OTE + {candle_pattern['pattern']} xác nhận"
+                if rsi_ok_long:
+                    result['valid'] = True
+                    result['action'] = 'LONG'
+                    result['reason'] = f"✅ Giá trong OTE + {candle_pattern['pattern']} + RSI OK"
+                else:
+                    result['action'] = 'WAIT'
+                    result['reason'] = f"⏳ Có nến {candle_pattern['pattern']} nhưng RSI chưa oversold ({rsi:.0f})"
             else:
                 result['action'] = 'WAIT'
-                result['reason'] = f"⏳ Giá trong vùng OTE, chờ nến xác nhận (Pinbar/Engulfing)"
+                result['reason'] = f"⏳ Giá trong OTE, chờ nến xác nhận"
         elif current_price > ote_high:
-            result['action'] = 'MISSED'
-            result['reason'] = f"❌ Giá đã vượt vùng OTE (${ote_high:,.0f})"
+            result['action'] = 'WAIT'
+            result['reason'] = f"⏳ Chờ giá hồi về OTE (${ote_low:,.0f} - ${ote_high:,.0f})"
         elif current_price < ote_low:
             result['action'] = 'INVALIDATED'
-            result['reason'] = f"⚠️ Giá đã phá vỡ dưới vùng OTE - Setup không hợp lệ"
+            result['reason'] = f"⚠️ Giá phá vỡ dưới OTE - Setup không hợp lệ"
         else:
             result['action'] = 'WAIT'
-            result['reason'] = f"⏳ Chờ giá về vùng OTE (${ote_low:,.0f} - ${ote_high:,.0f})"
+            result['reason'] = f"⏳ Chờ giá về OTE"
             
     else:  # Impulse DOWN -> SHORT
-        entry_price = fib_618  # Entry at 0.618
-        sl_price = fib_786 + atr * 1.5  # SL above 0.786 + ATR buffer
-        tp1_price = lowest['price']  # TP1 at swing low
-        tp2_price = lowest['price'] - fib_range * 0.272  # TP2 at -0.272 extension
+        entry_price = fib_618
+        sl_price = fib_786 + atr * 1.5
+        tp1_price = lowest['price']
+        tp2_price = lowest['price'] - fib_range * 0.272
         
         if price_in_ote or price_near_ote:
             if has_bearish_confirmation:
-                result['valid'] = True
-                result['action'] = 'SHORT'
-                result['reason'] = f"✅ Giá trong vùng OTE + {candle_pattern['pattern']} xác nhận"
+                if rsi_ok_short:
+                    result['valid'] = True
+                    result['action'] = 'SHORT'
+                    result['reason'] = f"✅ Giá trong OTE + {candle_pattern['pattern']} + RSI OK"
+                else:
+                    result['action'] = 'WAIT'
+                    result['reason'] = f"⏳ Có nến {candle_pattern['pattern']} nhưng RSI chưa overbought ({rsi:.0f})"
             else:
                 result['action'] = 'WAIT'
-                result['reason'] = f"⏳ Giá trong vùng OTE, chờ nến xác nhận (Pinbar/Engulfing)"
+                result['reason'] = f"⏳ Giá trong OTE, chờ nến xác nhận"
         elif current_price < ote_low:
-            result['action'] = 'MISSED'
-            result['reason'] = f"❌ Giá đã xuống dưới vùng OTE (${ote_low:,.0f})"
+            result['action'] = 'WAIT'
+            result['reason'] = f"⏳ Chờ giá hồi lên OTE (${ote_low:,.0f} - ${ote_high:,.0f})"
         elif current_price > ote_high:
             result['action'] = 'INVALIDATED'
-            result['reason'] = f"⚠️ Giá đã phá vỡ trên vùng OTE - Setup không hợp lệ"
+            result['reason'] = f"⚠️ Giá phá vỡ trên OTE - Setup không hợp lệ"
         else:
             result['action'] = 'WAIT'
-            result['reason'] = f"⏳ Chờ giá về vùng OTE (${ote_low:,.0f} - ${ote_high:,.0f})"
+            result['reason'] = f"⏳ Chờ giá về OTE"
     
     result['entry'] = entry_price
     result['sl'] = sl_price
@@ -1233,17 +1302,19 @@ def calculate_elliott_wave_fibo(df, lookback=100):
     result['tp2'] = tp2_price
     
     # Debug output
-    print(f"\n  🌊 Elliott Wave Fibo Analysis:")
-    print(f"    Impulse: {impulse_type} | Trend: {trend}")
-    print(f"    Swing High: ${highest['price']:,.0f} (idx {highest['idx']})")
-    print(f"    Swing Low: ${lowest['price']:,.0f} (idx {lowest['idx']})")
+    ema50_str = f"${ema50:,.0f}" if ema50 else "N/A"
+    ema200_str = f"${ema200:,.0f}" if ema200 else "N/A"
+    print(f"\n  🌊 Elliott Wave Fibo Analysis (3-Module):")
+    print(f"    EMA Trend: {ema_trend} | EMA50: {ema50_str} | EMA200: {ema200_str}")
+    print(f"    Impulse: {impulse_type} | Trade: {trend}")
+    print(f"    Swing High: ${highest['price']:,.0f} | Swing Low: ${lowest['price']:,.0f}")
     print(f"    Fibo Range: ${fib_range:,.0f}")
     print(f"    OTE Zone: ${ote_low:,.0f} - ${ote_high:,.0f}")
-    print(f"    Current Price: ${current_price:,.0f}")
-    print(f"    In OTE: {price_in_ote} | Near OTE: {price_near_ote}")
-    print(f"    Candle: {candle_pattern['pattern']} ({candle_pattern['type']})")
+    print(f"    Current Price: ${current_price:,.0f} | In OTE: {price_in_ote}")
+    print(f"    RSI: {rsi:.1f} | Candle: {candle_pattern['pattern']} ({candle_pattern['type']})")
     print(f"    -> Action: {result['action']}")
     print(f"    -> Reason: {result['reason']}")
     
     return result
+
 
