@@ -99,12 +99,33 @@ def predict_win_probability(df, signal_data):
                (signal_action == 'SHORT' and pattern_type == 'BEARISH'):
                 pattern_matches_trend = 1
 
+        # Prepare raw features
+        raw_rsi = df['RSI'].iloc[current_idx] if 'RSI' in df.columns else 50
+        raw_ema50_slope = df['EMA50'].pct_change(periods=5).iloc[current_idx] * 100 if 'EMA50' in df.columns else 0
+        raw_ema200_slope = df['EMA200'].pct_change(periods=10).iloc[current_idx] * 100 if 'EMA200' in df.columns else 0
+        raw_pv_ema50 = (df['close'].iloc[current_idx] - df['EMA50'].iloc[current_idx]) / df['EMA50'].iloc[current_idx] * 100 if 'EMA50' in df.columns else 0
+        raw_pv_ema200 = (df['close'].iloc[current_idx] - df['EMA200'].iloc[current_idx]) / df['EMA200'].iloc[current_idx] * 100 if 'EMA200' in df.columns else 0
+
+        # Invert features for SHORT signals (to see market from bearish perspective)
+        if signal_action == 'SHORT':
+            feat_rsi = 100 - raw_rsi
+            feat_ema50_slope = -raw_ema50_slope
+            feat_ema200_slope = -raw_ema200_slope
+            feat_pv_ema50 = -raw_pv_ema50
+            feat_pv_ema200 = -raw_pv_ema200
+        else:
+            feat_rsi = raw_rsi
+            feat_ema50_slope = raw_ema50_slope
+            feat_ema200_slope = raw_ema200_slope
+            feat_pv_ema50 = raw_pv_ema50
+            feat_pv_ema200 = raw_pv_ema200
+
         features = {
-            'rsi': df['RSI'].iloc[current_idx] if 'RSI' in df.columns else 50,
-            'ema50_slope': df['EMA50'].pct_change(periods=5).iloc[current_idx] * 100 if 'EMA50' in df.columns else 0,
-            'ema200_slope': df['EMA200'].pct_change(periods=10).iloc[current_idx] * 100 if 'EMA200' in df.columns else 0,
-            'price_vs_ema50': (df['close'].iloc[current_idx] - df['EMA50'].iloc[current_idx]) / df['EMA50'].iloc[current_idx] * 100 if 'EMA50' in df.columns else 0,
-            'price_vs_ema200': (df['close'].iloc[current_idx] - df['EMA200'].iloc[current_idx]) / df['EMA200'].iloc[current_idx] * 100 if 'EMA200' in df.columns else 0,
+            'rsi': feat_rsi,
+            'ema50_slope': feat_ema50_slope,
+            'ema200_slope': feat_ema200_slope,
+            'price_vs_ema50': feat_pv_ema50,
+            'price_vs_ema200': feat_pv_ema200,
             'vol_ratio': df['Vol_Ratio'].iloc[current_idx] if 'Vol_Ratio' in df.columns else 1,
             'bb_width': df['BB_Width'].iloc[current_idx] if 'BB_Width' in df.columns else 0.02,
             'has_pattern': has_pattern,
