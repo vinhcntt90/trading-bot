@@ -271,6 +271,7 @@ def calculate_indicators(df):
     df['BB_Std'] = df['close'].rolling(window=20).std()
     df['BB_Upper'] = df['BB_Middle'] + (2 * df['BB_Std'])
     df['BB_Lower'] = df['BB_Middle'] - (2 * df['BB_Std'])
+    df['BB_Width'] = (df['BB_Upper'] - df['BB_Lower']) / df['BB_Middle']
     
     # Volume
     df['Vol_MA20'] = df['volume'].rolling(window=20).mean()
