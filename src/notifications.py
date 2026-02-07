@@ -174,6 +174,17 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
     # Recommendation
     dir_emoji = "🟢" if plan['direction'] == 'LONG' else ("🔴" if plan['direction'] == 'SHORT' else "⚪")
     
+    # Get win probabilities for both directions
+    long_prob = plan.get('long_win_prob')
+    short_prob = plan.get('short_win_prob')
+    
+    def format_prob(prob, label):
+        if prob is None:
+            return f"{label}: N/A"
+        pct = prob * 100
+        emoji = "🟢" if pct >= 65 else ("🟡" if pct >= 50 else "🔴")
+        return f"{emoji} {label}: {pct:.0f}%"
+    
     rec_info = ""
     if plan['direction'] in ['LONG', 'SHORT']:
         active_plan = plan['long'] if plan['direction'] == 'LONG' else plan['short']
@@ -191,28 +202,14 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
    SL: ${sl:,.0f}
    TP1: ${tp1:,.0f} | TP2: ${tp2:,.0f} | TP3: ${tp3:,.0f}
    R/R: 1:{rr:.2f} | Win: {win:.0f}%
-   Score: {plan['score']:+d}"""
-
-        # AI Win Prob for Recommendation
-        rec_prob = plan.get('ai_win_prob')
-        if rec_prob is not None:
-            prob_pct = rec_prob * 100
-            prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
-            confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
-            rec_info += f"\n   {prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence})"
+   Score: {plan['score']:+d}
+   {format_prob(long_prob, 'LONG')} | {format_prob(short_prob, 'SHORT')}"""
     else:
         rec_info = f"""
 {dir_emoji} *RECOMMENDATION*
    Wait for clear setup
-   Score: {plan['score']:+d}"""
-
-        # AI Win Prob for WAIT state too (add hypothetical label)
-        rec_prob = plan.get('ai_win_prob')
-        if rec_prob is not None:
-            prob_pct = rec_prob * 100
-            prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
-            confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
-            rec_info += f"\n   {prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence}) _(Giả định)_"
+   Score: {plan['score']:+d}
+   {format_prob(long_prob, 'LONG')} | {format_prob(short_prob, 'SHORT')}"""
 
     # Golden Pocket Strategy
     gp_info = ""
@@ -228,15 +225,12 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
 • Zone: ${gp.get('low', 0):,.0f} - ${gp.get('high', 0):,.0f}
 {gp_emoji} {gp_strat['action']}"""
 
-        # AI Win Probability for GP
-        win_prob = gp_strat.get('win_probability')
-        if win_prob is not None:
-            prob_pct = win_prob * 100
-            prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
-            confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
-            # Add hypothetical label when no valid trade
+        # AI Win Probability for GP (Both directions)
+        gp_long = gp_strat.get('long_win_prob')
+        gp_short = gp_strat.get('short_win_prob')
+        if gp_long is not None and gp_short is not None:
             hypo_label = " _(Giả định)_" if not gp_strat['valid'] else ""
-            gp_info += f"\n{prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence}){hypo_label}"
+            gp_info += f"\n{format_prob(gp_long, 'LONG')} | {format_prob(gp_short, 'SHORT')}{hypo_label}"
         
         if gp_strat['valid']:
             gp_info += f"""
@@ -268,15 +262,12 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
 • OTE Zone: ${ote.get('low', 0):,.0f} - ${ote.get('high', 0):,.0f}
 {ew_emoji} {ew_strat['action']}"""
         
-        # AI Win Probability
-        win_prob = ew_strat.get('win_probability')
-        if win_prob is not None:
-            prob_pct = win_prob * 100
-            prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
-            confidence = "HIGH" if prob_pct >= 65 else ("MED" if prob_pct >= 50 else "LOW")
-            # Add hypothetical label when no valid trade
+        # AI Win Probability (Both directions)
+        ew_long = ew_strat.get('long_win_prob')
+        ew_short = ew_strat.get('short_win_prob')
+        if ew_long is not None and ew_short is not None:
             hypo_label = " _(Giả định)_" if not ew_strat['valid'] else ""
-            ew_info += f"\n{prob_emoji} *AI Win: {prob_pct:.0f}%* ({confidence}){hypo_label}"
+            ew_info += f"\n{format_prob(ew_long, 'LONG')} | {format_prob(ew_short, 'SHORT')}{hypo_label}"
         
         cp = ew_strat.get('candlestick_pattern', {})
         if cp and cp.get('pattern'):
@@ -306,9 +297,7 @@ def create_telegram_caption(plan, analyses, pivots, poc_data, df, derivatives_da
 *Multi-TF Bias:*
 {chr(10).join(tf_lines)}{deriv_info}
 {summary_info}
-{rec_info}{gp_info}{ew_info}
-
-{plan.get('llm_analysis') or ''}"""
+{rec_info}{gp_info}{ew_info}"""
     
     return caption
 

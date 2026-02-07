@@ -14,8 +14,7 @@ from .analysis import (
     get_moon_phase_simple, get_lunar_trading_signal, get_mercury_retrograde,
     detect_wyckoff_phase, analyze_smc,
     calculate_elliott_wave_fibo,
-    load_ml_model, predict_win_probability,
-    LLMAnalyst  # Embedded LLM Analyst
+    load_ml_model, predict_win_probability
 )
 from .plotting import plot_plotly_chart, plot_fibo_chart
 from .reporting import (
@@ -188,15 +187,6 @@ def main():
     plan['lunar'] = lunar_data
     plan['cp_data'] = chartprime_data
 
-    # 10b. LLM Second Analyst
-    if Config.LLM_ENABLED:
-        print("\n[*] Generative AI Analysis (Second Opinion)...")
-        llm = LLMAnalyst()
-        llm_analysis = llm.generate_analysis(plan, df, smc_data, derivatives_data)
-        plan['llm_analysis'] = llm_analysis
-        if llm_analysis:
-            print("    [+] Analysis received from Gemini.")
-    
     # 11. Golden Pocket Strategy
     print("\n[*] Calculating Golden Pocket Strategy (Parallel)...")
     gp_strategy = calculate_golden_pocket_strategy(df, smc_data, pivots)
@@ -217,21 +207,26 @@ def main():
     action_emoji = "🟢" if gp_strategy['action'] == 'LONG' else ("🔴" if gp_strategy['action'] == 'SHORT' else "⚪")
     print(f"  {action_emoji} Action: {gp_strategy['action']}")
     
-    # Phase 5: AI Win Probability for Golden Pocket (ALWAYS Calculate)
-    # Determine potential action based on trend
-    potential_action = 'LONG' if gp_strategy['trend'] == 'BULLISH' else 'SHORT'
-    gp_signal_data = {
-        'action': potential_action,
-        'trend': gp_strategy['trend'],
-    }
-    gp_win_prob = predict_win_probability(df, gp_signal_data)
-    gp_strategy['win_probability'] = gp_win_prob
+    # Phase 5: AI Win Probability for Golden Pocket (Calculate BOTH directions)
+    gp_long_signal = {'action': 'LONG', 'trend': 'BULLISH'}
+    gp_short_signal = {'action': 'SHORT', 'trend': 'BEARISH'}
+    gp_long_prob = predict_win_probability(df, gp_long_signal)
+    gp_short_prob = predict_win_probability(df, gp_short_signal)
     
-    if gp_win_prob is not None:
-        prob_pct = gp_win_prob * 100
-        prob_bar = "█" * int(prob_pct / 10) + "░" * (10 - int(prob_pct / 10))
-        prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
-        print(f"  {prob_emoji} AI Win Prob ({potential_action}): {prob_pct:.1f}% [{prob_bar}]")
+    # Store both probabilities
+    gp_strategy['long_win_prob'] = gp_long_prob
+    gp_strategy['short_win_prob'] = gp_short_prob
+    gp_strategy['win_probability'] = gp_long_prob if gp_strategy['trend'] == 'BULLISH' else gp_short_prob
+    
+    # Display both probabilities
+    def format_prob_console(prob, label):
+        if prob is None:
+            return f"{label}: N/A"
+        pct = prob * 100
+        emoji = "🟢" if pct >= 65 else ("🟡" if pct >= 50 else "🔴")
+        return f"{emoji} {label}: {pct:.1f}%"
+    
+    print(f"  {format_prob_console(gp_long_prob, 'LONG')} | {format_prob_console(gp_short_prob, 'SHORT')}")
 
     if gp_strategy['valid']:
         print(f"  Entry1 (50%)   : ${gp_strategy.get('entry1', gp_strategy['entry']):,.0f}")
@@ -246,11 +241,17 @@ def main():
     print("\n[*] Calculating Elliott Wave + Fibonacci Strategy...")
     ew_fibo = calculate_elliott_wave_fibo(df, lookback=100)
     
-    # Phase 4: ML Prediction
+    # Phase 4: ML Prediction (Calculate BOTH directions)
     print("[*] Loading AI Brain for Win Probability...")
     load_ml_model()
-    win_prob = predict_win_probability(df, ew_fibo)
-    ew_fibo['win_probability'] = win_prob
+    ew_long_signal = {'action': 'LONG', 'trend': 'BULLISH'}
+    ew_short_signal = {'action': 'SHORT', 'trend': 'BEARISH'}
+    ew_long_prob = predict_win_probability(df, ew_long_signal)
+    ew_short_prob = predict_win_probability(df, ew_short_signal)
+    
+    ew_fibo['long_win_prob'] = ew_long_prob
+    ew_fibo['short_win_prob'] = ew_short_prob
+    ew_fibo['win_probability'] = ew_long_prob if ew_fibo.get('impulse_type') == 'UP' else ew_short_prob
     
     plan['elliott_wave_fibo'] = ew_fibo
     
@@ -270,19 +271,8 @@ def main():
     ew_emoji = "🟢" if ew_fibo['action'] == 'LONG' else ("🔴" if ew_fibo['action'] == 'SHORT' else "⚪")
     print(f"  {ew_emoji} Action: {ew_fibo['action']}")
     
-    # Display Win Probability
-    if win_prob is not None:
-        prob_pct = win_prob * 100
-        prob_bar = "█" * int(prob_pct / 10) + "░" * (10 - int(prob_pct / 10))
-        prob_emoji = "🟢" if prob_pct >= 65 else ("🟡" if prob_pct >= 50 else "🔴")
-        print(f"  {prob_emoji} AI Win Prob: {prob_pct:.1f}% [{prob_bar}]")
-        
-        if prob_pct >= 65:
-            print(f"     ✅ HIGH CONFIDENCE - Signal Approved!")
-        elif prob_pct >= 50:
-            print(f"     ⚠️ MEDIUM CONFIDENCE - Proceed with caution")
-        else:
-            print(f"     ❌ LOW CONFIDENCE - Signal Rejected")
+    # Display both probabilities
+    print(f"  {format_prob_console(ew_long_prob, 'LONG')} | {format_prob_console(ew_short_prob, 'SHORT')}")
     
     if ew_fibo['valid']:
         print(f"  Entry          : ${ew_fibo['entry']:,.0f}")

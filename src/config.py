@@ -16,10 +16,6 @@ class Config:
     # Bật/Tắt gửi Telegram (True = gửi, False = không gửi)
     SEND_TO_TELEGRAM = True
     
-    # AI / LLM Configuration
-    LLM_ENABLED = True
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-    
     # Paths
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ARTIFACTS_DIR = os.getenv("ARTIFACTS_DIR", os.path.join(os.path.expanduser('~'), 'Desktop'))

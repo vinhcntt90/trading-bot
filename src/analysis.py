@@ -777,19 +777,20 @@ def calculate_trading_plan(df, pivots, poc_data, timeframes_bias, gann_data=None
     elif score <= -1: direction = 'SHORT'
     else: direction = 'WAIT'
     
-    # Phase 5: AI Win Probability for Recommendation (ALWAYS Calculate)
-    # If WAIT, we still predict for the likely next action based on score tendency
+    # Phase 5: AI Win Probability for BOTH directions (ALWAYS Calculate)
+    long_signal_data = {'action': 'LONG', 'trend': 'BULLISH'}
+    short_signal_data = {'action': 'SHORT', 'trend': 'BEARISH'}
+    
+    long_win_prob = predict_win_probability(df, long_signal_data)
+    short_win_prob = predict_win_probability(df, short_signal_data)
+    
+    # Determine which is recommended based on score/direction
     if direction == 'WAIT':
-        # Use bias to determine potential action
         potential_action = 'LONG' if bull_count > bear_count else 'SHORT'
     else:
         potential_action = direction
     
-    rec_signal_data = {
-        'action': potential_action,
-        'trend': 'BULLISH' if potential_action == 'LONG' else 'BEARISH'
-    }
-    rec_win_prob = predict_win_probability(df, rec_signal_data)
+    rec_win_prob = long_win_prob if potential_action == 'LONG' else short_win_prob
     
     # Adjust Score based on AI Confidence (only if not WAIT)
     if direction != 'WAIT' and rec_win_prob is not None:
@@ -800,12 +801,12 @@ def calculate_trading_plan(df, pivots, poc_data, timeframes_bias, gann_data=None
     long_plan = {
         'entry': pivots['S1'], 'sl': pivots['S2'], 
         'tp1': pivots['PP'], 'tp2': pivots['R1'], 'tp3': pivots['R2'],
-        'win_probability': rec_win_prob if direction == 'LONG' else None
+        'win_probability': long_win_prob
     }
     short_plan = {
         'entry': pivots['R1'], 'sl': pivots['R2'], 
         'tp1': pivots['PP'], 'tp2': pivots['S1'], 'tp3': pivots['S2'],
-        'win_probability': rec_win_prob if direction == 'SHORT' else None
+        'win_probability': short_win_prob
     }
     
     return {
@@ -814,7 +815,9 @@ def calculate_trading_plan(df, pivots, poc_data, timeframes_bias, gann_data=None
         'signal_analysis': signals, 
         'long': long_plan, 
         'short': short_plan,
-        'ai_win_prob': rec_win_prob,  # Return for reporting
+        'ai_win_prob': rec_win_prob,
+        'long_win_prob': long_win_prob,
+        'short_win_prob': short_win_prob,
         'current_price': df['close'].iloc[-1]
     }
 
@@ -1460,111 +1463,7 @@ def calculate_elliott_wave_fibo(df, lookback=100, use_ema_filter=True, use_rsi_f
     return result
 
 
-# ============================================
-# LLM ANALYST (Embedded) - Using direct REST API
-# ============================================
-import requests
-from .config import Config
 
-class LLMAnalyst:
-    def __init__(self):
-        self.api_key = Config.GEMINI_API_KEY
-        self.ready = False
-        self._setup()
-
-    def _setup(self):
-        if not self.api_key:
-            print("  [!] GEMINI_API_KEY not set.")
-            return
-        
-        if not Config.LLM_ENABLED:
-            return
-
-        self.ready = True
-        print("  [+] LLM Analyst (Gemini REST API) initialized.")
-
-    def generate_analysis(self, plan, indicators, smc_data, sentiment_data):
-        if not self.ready or not Config.LLM_ENABLED:
-            return None
-
-        try:
-            prompt = self._construct_prompt(plan, indicators, smc_data, sentiment_data)
-            
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.api_key}"
-            
-            payload = {
-                "contents": [{
-                    "parts": [{"text": prompt}]
-                }],
-                "generationConfig": {
-                    "maxOutputTokens": 400,
-                    "temperature": 0.7
-                }
-            }
-            
-            response = requests.post(url, json=payload, timeout=30)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if 'candidates' in data and len(data['candidates']) > 0:
-                    return data['candidates'][0]['content']['parts'][0]['text']
-            else:
-                print(f"  [!] Gemini API Error: {response.status_code} - {response.text[:200]}")
-            return None
-        except Exception as e:
-            print(f"  [!] Error generating LLM analysis: {e}")
-            return None
-
-    def _construct_prompt(self, plan, indicators, smc_data, sentiment_data):
-        price = indicators['close'].iloc[-1]
-        rsi = indicators['RSI'].iloc[-1]
-        
-        ema50 = indicators['EMA50'].iloc[-1] if 'EMA50' in indicators else 0
-        ema200 = indicators['EMA200'].iloc[-1] if 'EMA200' in indicators else 0
-        trend_status = "BULLISH (Price > EMA200)" if price > ema200 else "BEARISH (Price < EMA200)"
-        
-        ew_data = plan.get('elliott_wave_fibo', {})
-        wave_context = ew_data.get('wave_context', 'N/A')
-        ote_zone = ew_data.get('ote_zone', {})
-        fibo_level = f"${ote_zone.get('low', 0):,.0f} - ${ote_zone.get('high', 0):,.0f}" if ote_zone else "N/A"
-        
-        cp = ew_data.get('candlestick_pattern', {})
-        pattern = f"{cp.get('pattern', 'None')} ({cp.get('type', 'None')})"
-        
-        vol_ratio = indicators['Vol_Ratio'].iloc[-1] if 'Vol_Ratio' in indicators else 0
-        volume_status = f"High ({vol_ratio:.2f}x avg)" if vol_ratio > 1.2 else "Normal/Low"
-
-        prompt = f'''
-Role: You are a Senior Crypto Technical Analyst & Risk Manager with 15 years of experience. You specialize in Elliott Wave Theory, Fibonacci, and Smart Money Concepts (SMC).
-
-Task: Analyze the following trading setup provided by my algorithm and make a final decision.
-
-Input Data:
-- Symbol: BTC/USDT
-- Timeframe: 15m
-- Current Price: ${price:,.0f}
-- Market Structure (EMA Trend): {trend_status}
-- Elliott Wave Context: {wave_context}
-- Fibonacci Level: {fibo_level} (Expected OTE: 0.618 - 0.786)
-- Candlestick Pattern: {pattern}
-- RSI (14): {rsi:.1f}
-- Volume Analysis: {volume_status}
-- Bot Recommendation: {plan.get('direction')}
-
-Instructions:
-1. Validate the Confluence: Does the Candlestick Pattern appear exactly at the Fibonacci OTE level?
-2. Check for Contradictions: Is the RSI overbought/oversold against the trade direction? Is the trend actually supporting this?
-3. Risk Assessment: Is this a high-probability setup for catching Wave 3?
-
-IMPORTANT OUTPUT FORMAT (IN VIETNAMESE):
-🤖 **Góc nhìn AI:**
-[Emoji] [Nhận định Bullish/Bearish/Neutral]
-• [Phân tích sóng/Fibo]: ...
-• [Tín hiệu nến/Volume]: ...
-• [Kết luận rủi ro]: ...
-(Trả lời NGẮN GỌN, súc tích bằng TIẾNG VIỆT)
-'''
-        return prompt
 
 
 
